@@ -1,4 +1,4 @@
 [submodule "curobo_core/curobo"]
 	path = curobo_core/curobo
 	url = https://github.com/Goddard-Technologies-LLC/Kiosk-curobo.git
-	branch = isaac-3.2
+	branch = isaac-3.2-kiosk
