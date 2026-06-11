@@ -65,6 +65,13 @@ class CumotionGoalSetClient:
                 f'{len(msg.world.collision_objects)} objects'
             )
 
+    def wait_for_joint_state(self) -> dict:
+        """Block until a joint state message is available and return a copy."""
+        self.__js_buffer = None
+        while self.__js_buffer is None:
+            time.sleep(0.001)
+        return copy.deepcopy(self.__js_buffer)
+
     def js_callback(self, msg):
 
         if len(msg.velocity) == 0 or len(msg.position) == 0:

@@ -119,24 +119,22 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
         start_state = None
         plan_req = goal_handle.request
         if plan_req.use_current_state:
-            if self._CumotionActionServer__js_buffer is None:
-                self.get_logger().error(
-                    'joint_state was not received from '
-                    + self._CumotionActionServer__joint_states_topic
-                )
-                return result
+            with self.lock:
+                js_buf = self._CumotionActionServer__js_buffer
+                if js_buf is None:
+                    self.get_logger().error(
+                        'joint_state was not received from '
+                        + self._CumotionActionServer__joint_states_topic
+                    )
+                    return result
+                self._CumotionActionServer__js_buffer = None
             # read joint state:
             state = CuJointState.from_position(
-                position=self.tensor_args.to_device(
-                    self._CumotionActionServer__js_buffer['position']
-                ).unsqueeze(0),
-                joint_names=self._CumotionActionServer__js_buffer['joint_names'],
+                position=self.tensor_args.to_device(js_buf['position']).unsqueeze(0),
+                joint_names=js_buf['joint_names'],
             )
-            state.velocity = self.tensor_args.to_device(
-                self._CumotionActionServer__js_buffer['velocity']
-            ).unsqueeze(0)
+            state.velocity = self.tensor_args.to_device(js_buf['velocity']).unsqueeze(0)
             start_state = self.motion_gen.get_active_js(state)
-            self._CumotionActionServer__js_buffer = None
         elif len(plan_req.start_state.position) > 0:
             start_state = self.motion_gen.get_active_js(
                 CuJointState.from_position(
@@ -175,6 +173,7 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
                     max_attempts=self._CumotionActionServer__max_attempts,
                     enable_graph_attempt=1,
                     time_dilation_factor=time_dilation_factor,
+                    enable_finetune_trajopt=True,
                 ),
                 grasp_approach_offset=self.get_cu_pose_from_ros_pose(plan_req.grasp_offset_pose),
                 grasp_approach_path_constraint=grasp_vec_weight,
@@ -225,6 +224,7 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
                         max_attempts=self._CumotionActionServer__max_attempts,
                         enable_graph_attempt=1,
                         time_dilation_factor=time_dilation_factor,
+                        enable_finetune_trajopt=False,
                     ),
                 )
                 self.toggle_link_collision(plan_req.disable_collision_links, True)
@@ -232,15 +232,15 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
             elif plan_req.plan_pose:
                 self.get_logger().info('Planning Pose target')
                 if plan_req.hold_partial_pose:
-                    if len(plan_req.grasp_partial_pose_vec_weight) < 6:
+                    if len(plan_req.hold_partial_pose_vec_weight) < 6:
                         self.get_logger().error('Partial pose vec weight should be of length 6')
                         return result
 
-                    grasp_vec_weight = [plan_req.grasp_partial_pose_vec_weight[i]
-                                        for i in range(6)]
+                    hold_vec_weight = [plan_req.hold_partial_pose_vec_weight[i]
+                                       for i in range(6)]
                     pose_cost_metric = PoseCostMetric(
                         hold_partial_pose=True,
-                        grasp_vec_weight=self.motion_gen.tensor_args.to_device(grasp_vec_weight),
+                        hold_vec_weight=self.motion_gen.tensor_args.to_device(hold_vec_weight),
                     )
 
                 # read goal poses:
@@ -261,6 +261,7 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
                             enable_graph_attempt=1,
                             time_dilation_factor=time_dilation_factor,
                             pose_cost_metric=pose_cost_metric,
+                            enable_finetune_trajopt=plan_req.hold_partial_pose,
                         ),
                     )
                 else:
@@ -272,6 +273,7 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
                             enable_graph_attempt=1,
                             time_dilation_factor=time_dilation_factor,
                             pose_cost_metric=pose_cost_metric,
+                            enable_finetune_trajopt=plan_req.hold_partial_pose,
                         ),
                     )
                 self.toggle_link_collision(plan_req.disable_collision_links, True)

@@ -281,11 +281,12 @@ class CumotionActionServer(Node):
         )
 
     def js_callback(self, msg):
-        self.__js_buffer = {
-            'joint_names': msg.name,
-            'position': msg.position,
-            'velocity': msg.velocity,
-        }
+        with self.lock:
+            self.__js_buffer = {
+                'joint_names': msg.name,
+                'position': msg.position,
+                'velocity': msg.velocity,
+            }
 
     def load_motion_gen(self):
         tensor_args = self.tensor_args
@@ -348,11 +349,12 @@ class CumotionActionServer(Node):
 
     def on_timer(self):
         with self.lock:
-            if self.__js_buffer is None:
+            js_buf = self.__js_buffer
+            if js_buf is None:
                 return
 
-            js = np.copy(self.__js_buffer['position'])
-            j_names = deepcopy(self.__js_buffer['joint_names'])
+            js = np.copy(js_buf['position'])
+            j_names = deepcopy(js_buf['joint_names'])
 
         self.__update_link_spheres_server.publish_all_active_spheres(
             robot_joint_states=js,
@@ -684,7 +686,9 @@ class CumotionActionServer(Node):
                 'PlanRequest start state was empty, reading current joint state'
             )
         if start_state is None or plan_req.start_state.is_diff:
-            if self.__js_buffer is None:
+            with self.lock:
+                js_buf = self.__js_buffer
+            if js_buf is None:
                 self.get_logger().error(
                     'joint_state was not received from ' + self.__joint_states_topic
                 )
@@ -692,10 +696,10 @@ class CumotionActionServer(Node):
 
             # read joint state:
             state = CuJointState.from_position(
-                position=self.tensor_args.to_device(self.__js_buffer['position']).unsqueeze(0),
-                joint_names=self.__js_buffer['joint_names'],
+                position=self.tensor_args.to_device(js_buf['position']).unsqueeze(0),
+                joint_names=js_buf['joint_names'],
             )
-            state.velocity = self.tensor_args.to_device(self.__js_buffer['velocity']).unsqueeze(0)
+            state.velocity = self.tensor_args.to_device(js_buf['velocity']).unsqueeze(0)
             if state.velocity.shape != state.position.shape:
                 self.get_logger().error(
                     'start joint position shape is  ' + str(state.position.shape) +
