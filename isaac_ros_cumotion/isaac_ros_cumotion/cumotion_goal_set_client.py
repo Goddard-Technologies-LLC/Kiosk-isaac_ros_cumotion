@@ -65,6 +65,15 @@ class CumotionGoalSetClient:
                 f'{len(msg.world.collision_objects)} objects'
             )
 
+    def wait_for_planning_scene(self, timeout_sec: float = 12.0) -> PlanningScene | None:
+        deadline = time.time() + timeout_sec
+        while time.time() < deadline:
+            with self.__planning_scene_lock:
+                if self.__latest_planning_scene is not None:
+                    return copy.deepcopy(self.__latest_planning_scene)
+            time.sleep(0.01)
+        return None  # sync_planning_scene already handles None with a warning
+
     def wait_for_joint_state(self) -> dict:
         """Block until a joint state message is available and return a copy."""
         self.__js_buffer = None
@@ -273,12 +282,46 @@ class CumotionGoalSetClient:
 
     def move_joint(
         self,
-        goal_state: CuJointState,
+        joint_names: List[str],
+        joint_positions: List[float],
         start_state: Optional[CuJointState] = None,
         plan_config: Optional[MotionGenPlanConfig] = None,
+        visualize_trajectory: bool = True,
+        execute: bool = False,
+        disable_collision_links: List[str] = [],
+        update_planning_scene: bool = False,
     ):
-        # Reserving for future use
-        pass
+        # generate request:
+        self.node.get_logger().info('Moving to joint state')
+        goal_msg = MotionPlan.Goal()
+        goal_msg.goal_state.name = list(joint_names)
+        goal_msg.goal_state.position = [float(p) for p in joint_positions]
+
+        # cspace planning targets an explicit joint configuration (not a pose)
+        goal_msg.plan_cspace = True
+        goal_msg.plan_pose = False
+
+        goal_msg.use_current_state = True
+        if start_state is not None:
+            goal_msg.use_current_state = False
+            goal_msg.start_state.position = start_state.position.cpu().flatten().tolist()
+            goal_msg.start_state.name = start_state.joint_names
+
+        goal_msg.use_planning_scene = update_planning_scene
+        with self.__planning_scene_lock:
+            if update_planning_scene and self.__latest_planning_scene is not None:
+                goal_msg.world = self.__latest_planning_scene.world
+
+        goal_msg.hold_partial_pose = False
+        if plan_config is not None and plan_config.time_dilation_factor is not None:
+            goal_msg.time_dilation_factor = plan_config.time_dilation_factor
+
+        goal_msg.disable_collision_links = disable_collision_links
+        result = self.send_plan_goal(goal_msg, visualize_trajectory)
+        if execute:
+            if result.success:
+                self.execute_plan(result.planned_trajectory[0])
+        return result
 
     def execute_plan(self, robot_trajectory, wait_until_complete: bool = True):
         # check if robot's current state is within start state of plan:

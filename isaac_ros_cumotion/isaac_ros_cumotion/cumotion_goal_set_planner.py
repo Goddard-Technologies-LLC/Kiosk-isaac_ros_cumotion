@@ -286,7 +286,10 @@ class CumotionGoalSetPlannerServer(CumotionActionServer):
                 result.planning_time = motion_gen_result.total_time
                 result.planned_trajectory.append(traj)
                 result.success = True
-                result.goal_index = motion_gen_result.goalset_index.item()
+                # CSpace (plan_single_js) plans have no goalset index; only
+                # pose/goalset plans populate it.
+                if motion_gen_result.goalset_index is not None:
+                    result.goal_index = motion_gen_result.goalset_index.item()
             elif not motion_gen_result.valid_query:
                 self.get_logger().error(f'Invalid planning query: {motion_gen_result.status}')
                 if motion_gen_result.status == MotionGenStatus.INVALID_START_STATE_JOINT_LIMITS:
